@@ -1,0 +1,163 @@
+/dts-v1/;
+
+/*
+ * Board file custom, diturunkan dari sf19a28_fullmask_ac28s.dts (resmi
+ * Siflower, repo 1806_SDK). Dipakai sebagai base karena flash size di
+ * referensi itu total 8MB (0xa0000 + 0x760000 = 0x800000), sama dengan
+ * flash fisik di device kalian.
+ *
+ * PERBEDAAN dari file stok Siflower: blok &spi2 di bawah TIDAK memakai
+ * partition table bawaan ac28s. Sebagai gantinya dipakai offset yang
+ * dikonfirmasi langsung dari device kalian:
+ *   - firmware mulai di 0x80000  <- dari printenv.txt:
+ *       bootcmd=sf probe 0 33000000;sf read 0x81000000 0x80000 0x300000;bootm
+ *   - factory (ART/Wi-Fi cal) di 0x70000, ukuran 0x10000  <- dikonfirmasi
+ *     dari "Data EEPROM - Wi-Fi Calibration.txt":
+ *       sf read 0x81000000 0x70000 0x10000  -> isi kalibrasi radio terlihat
+ *       di offset 0xb0-0xc0 dump (pola tanggal produksi & data non-0xFF)
+ *
+ * BELUM terverifikasi dari dump flash penuh (WAJIB dicek sebelum flashing
+ * sungguhan - lihat PANDUAN_BUILD_OPENWRT_SFA28.md bagian 2):
+ *   - Batas pasti spl-loader / u-boot / u-boot-env (di bawah pakai ukuran
+ *     dari "Rangkuman Spesifikasi Perangkat" milik user: 32K/412K/4K -
+ *     ini konsisten karena totalnya pas 0x70000, tapi belum dicocokkan
+ *     byte-per-byte dengan dump asli)
+ *   - Isi & format partisi cfm/cfg (khas Tenda, formatnya beda dari
+ *     fixed-partitions biasa - kemungkinan perlu parser khusus)
+ *   - 64KB terakhir (0x7f0000-0x800000) - tidak disebut di layout manapun
+ */
+
+#include "sf19a28_fullmask.dtsi"
+#include "sf19a28-thermal_common.dtsi"
+
+/ {
+	#address-cells = <1>;
+	#size-cells = <1>;
+	compatible = "siflower,sf19a28-soc";
+	/* TODO: ganti model ini ke nama produk Tenda sebenarnya begitu
+	 * diketahui (mis. "tenda,ac28s-v1.0" atau apa pun nama resminya) */
+	model = "sf19a28-ac28s-custom";
+};
+
+&gmac {
+	status = "okay";
+	delay = <0x40 0x20>;
+	esw-rst-gpio = <11>;
+};
+
+&spi2 {
+	status = "okay";
+	dmas = <&gdma 10
+	&gdma 11>;
+	dma-names = "tx", "rx";
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* TODO: ganti compatible/node-name ini ke chip flash asli. Ringkasan
+	 * kalian menyebut W25Q64CV/S25FL064K (8MB / 64Mbit), BUKAN w25q128
+	 * seperti di dts stok ac28s - cek marking fisik chip di PCB untuk pastikan. */
+	w25q64@0 {
+		compatible = "w25q64";
+		reg = <0>;
+		spi-max-frequency = <33000000>; /* dari "sf probe 0 33000000" */
+
+		bank-width = <2>;
+		device-width = <2>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		partition@0 {
+			label = "spl-loader";
+			reg = <0x0 0x8000>; /* 32K */
+			read-only;
+		};
+
+		partition@8000 {
+			label = "u-boot";
+			reg = <0x8000 0x67000>; /* 412K */
+		};
+
+		partition@6f000 {
+			label = "u-boot-env";
+			reg = <0x6f000 0x1000>; /* 4K */
+		};
+
+		factory: partition@70000 {
+			label = "factory";
+			reg = <0x70000 0x10000>; /* 64K - CONFIRMED dari dump Wi-Fi cal */
+			read-only;
+		};
+
+		partition@80000 {
+			label = "firmware";
+			reg = <0x80000 0x740000>; /* CONFIRMED start dari bootcmd; ukuran = sisa flash s.d. sebelum cfm/cfg */
+		};
+
+		partition@7c0000 {
+			label = "cfm";
+			reg = <0x7c0000 0x30000>; /* 192K - config Tenda, belum diverifikasi */
+		};
+
+		/* 0x7f0000 - 0x800000 (64K terakhir): BELUM diketahui isinya,
+		 * jangan dipakai/ditimpa sebelum dump flash penuh dicek */
+	};
+};
+
+&uart0 {
+	status = "okay";
+};
+
+&pwm0 {
+	status = "okay";
+};
+
+&pwm1 {
+	status = "okay";
+};
+
+&timer0 {
+	status = "okay";
+};
+
+&usb_phy {
+	status = "okay";
+};
+
+&usb {
+	status = "okay";
+};
+
+&wifi_rf {
+	status = "okay";
+	/* only support ext pa for 5G - dipertahankan dari referensi ac28s */
+	force_expa = <1>;
+	dual-antenna-calibrate = <1>;
+};
+
+&gpio_keys {
+	status = "okay";
+	restart@27 {
+		label = "Key Restart";
+		linux,code = <0x198>;
+		gpios = <&gpio 27 0>;
+		poll-interval = <10>;
+		debounce-interval = <20>;
+	};
+};
+
+&wifi_lb {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	gpio-leds = <&gpio 12 0>;
+	smp-affinity = <2>;
+};
+
+&wifi_hb {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	gpio-leds = <&gpio 12 0>;
+	smp-affinity = <3>;
+};
