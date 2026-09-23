@@ -74,22 +74,43 @@ sudo apt install -y build-essential asciidoc bison flex g++ gawk \
 
 ## 4. Menyesuaikan target ke board kalian
 
-1. Masuk ke `openwrt-18.06/`, cari target siflower yang paling dekat dengan
-   nama mesin di log kalian (`sf19a28-ac28s` / `sfa28`):
+**Update:** file dts asli dari repo Siflower (`sf19a28_fullmask.dtsi`,
+`sf19a28_fullmask_ac28.dts`, `sf19a28_fullmask_ac28s.dts`) sudah dicek.
+Kesimpulan:
+
+- `sf19a28-ac28s` adalah base paling dekat (total partisi di file itu = 8MB,
+  sama seperti flash fisik kalian; `ac28` polos itu varian 16MB, jangan
+  dipakai).
+- **Tapi partition table di dalam `sf19a28_fullmask_ac28s.dts` bawaan
+  TIDAK sama persis dengan device kalian.** OEM (kemungkinan Tenda) sudah
+  menggeser offset spl-loader/u-boot/u-boot-env/factory/firmware dari versi
+  stok. Yang terbukti benar dari log device kalian:
+  - firmware mulai di `0x80000` (dari `bootcmd` di printenv.txt)
+  - factory (kalibrasi Wi-Fi) di `0x70000`, ukuran `0x10000` (dikonfirmasi
+    langsung dari dump `Data EEPROM - Wi-Fi Calibration.txt`)
+
+  File `sf19a28_fullmask_ac28s_custom.dts` yang saya buat sudah
+  menggabungkan: node-node device level (clock, pinctrl, gmac, wifi) dari
+  file asli Siflower + partition table yang dikoreksi sesuai bukti nyata di
+  atas. Bagian yang masih perlu kalian verifikasi ditandai `TODO`/komentar
+  di file tersebut (terutama batas pasti spl-loader/u-boot/u-boot-env dan
+  isi 64KB terakhir flash — baru bisa dipastikan dari dump flash penuh).
+
+1. Masuk ke `openwrt-18.06/`, taruh `sf19a28_fullmask_ac28s_custom.dts` di
+   folder dts board Siflower (biasanya sejajar dengan
+   `sf19a28_fullmask_ac28s.dts` asli — cari dengan):
    ```bash
    cd openwrt-18.06
-   find target/linux -iname '*sfa28*' -o -iname '*ac28*' -o -iname '*sf19a28*'
+   find . -iname 'sf19a28_fullmask_ac28s.dts'
    ```
-2. Bandingkan file `.dts`/`.dtsi` board yang ditemukan dengan
-   `partition-8MB.dtsi` yang saya siapkan (lihat file terpisah) — sesuaikan
-   offset partisi kalau ada perbedaan dengan dump flash asli kalian.
-3. Kalau tidak ada target yang persis cocok (kemungkinan besar, karena board
-   Tenda biasanya custom), kalian perlu **menduplikasi board profile yang
-   paling mirip** (biasanya named `*-ac28s*` atau eval board `sfa28`) lalu:
-   - ganti `compatible`/`model` sesuai model Tenda kalian,
-   - timpa blok `partitions` dengan isi `partition-8MB.dtsi`,
-   - sesuaikan `ethaddr`/nvmem MAC agar dibaca dari partisi `factory`, bukan
-     hardcode.
+2. Cari juga file board-profile/Makefile OpenWrt yang mereferensikan
+   `ac28s` sebagai `DEVICE_DTS` atau `BOARDNAME`, duplikasi entry itu untuk
+   dts baru kalian, ganti nama profile ke sesuatu yang jelas (mis.
+   `tenda_xxxx`).
+3. Sebelum build, verifikasi ulang isi `sf19a28_fullmask_ac28s_custom.dts`
+   terhadap dump flash penuh (lihat bagian 2) — terutama chip flash (dts
+   masih pakai node `w25q64@0` sebagai tebakan dari spesifikasi kalian,
+   cocokkan dengan marking fisik chip di PCB).
 4. Jalankan `make menuconfig`, pilih target Siflower yang sudah kalian
    sesuaikan, lalu paket-paket yang diperlukan (luci, dsb).
 
@@ -133,7 +154,9 @@ your-repo/
 │   ├── bdinfo.txt
 │   ├── printenv.txt
 │   ├── FDT.txt
-│   └── partition-8MB.dtsi
+│   ├── sf19a28_fullmask.dtsi          (asli Siflower, referensi SoC)
+│   ├── sf19a28_fullmask_ac28s.dts     (asli Siflower, referensi board 8MB)
+│   └── sf19a28_fullmask_ac28s_custom.dts  (board dts hasil koreksi untuk device kalian)
 └── README.md
 ```
 Simpan semua log mentah kalian (bdinfo, printenv, FDT) di repo — sangat
