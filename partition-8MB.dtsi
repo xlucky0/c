@@ -1,0 +1,80 @@
+/*
+ * Fragmen partition table untuk board Siflower SFA28 / SF19A28 (kemungkinan
+ * Tenda, dilihat dari partisi CFM/CFG). Disusun berdasarkan:
+ *   - bootcmd (printenv.txt): sf probe 0 33000000; sf read 0x81000000 0x80000 0x300000; bootm
+ *   - Data EEPROM - Wi-Fi Calibration.txt: sf read ... 0x70000 0x10000 (factory/ART 64KB)
+ *   - Rangkuman Spesifikasi Perangkat: layout MTD 8MB
+ *
+ * PERINGATAN:
+ *   - Offset & ukuran di bawah ini DIAMBIL dari log yang diberikan user, belum
+ *     diverifikasi dengan dump flash penuh (full 8MB). Sebelum dipakai untuk
+ *     build/flash sungguhan, WAJIB dump seluruh isi flash via u-boot:
+ *         sf probe 0
+ *         sf read 0x81000000 0x0 0x800000
+ *         (lalu tftp/xmodem-kan 0x81000000 sebanyak 0x800000 byte ke PC)
+ *     dan bandingkan byte-per-byte dengan tabel ini, terutama 64KB terakhir
+ *     (0x7f0000 - 0x800000) yang belum ter-mapping di data yang diberikan.
+ *   - Ukuran "firmware" (kernel+rootfs) di bootcmd cuma baca 0x300000 (3MB)
+ *     ke RAM untuk kernel; sisanya (rootfs squashfs) dibaca langsung oleh
+ *     driver MTD SPI-NOR di kernel, bukan oleh u-boot. Jangan bingung dengan
+ *     ukuran partisi "firmware" 0x740000 di bawah, itu total kernel+rootfs.
+ */
+
+&spi0 {
+	status = "okay";
+
+	spi-flash@0 {
+		compatible = "spi-flash", "jedec,spi-nor";
+		reg = <0x0>;
+		spi-max-frequency = <33000000>; /* dari "sf probe 0 33000000" */
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			partition@0 {
+				label = "spl-loader";
+				reg = <0x00000000 0x00008000>; /* 32 KB */
+				read-only;
+			};
+
+			partition@8000 {
+				label = "u-boot";
+				reg = <0x00008000 0x00067000>; /* 412 KB */
+				read-only;
+			};
+
+			partition@6f000 {
+				label = "u-boot-env";
+				reg = <0x0006f000 0x00001000>; /* 4 KB */
+			};
+
+			factory: partition@70000 {
+				label = "factory";
+				reg = <0x00070000 0x00010000>; /* 64 KB - ART/Wi-Fi cal, VERIFIED oleh dump EEPROM */
+				read-only;
+			};
+
+			partition@80000 {
+				label = "firmware";
+				reg = <0x00080000 0x00740000>; /* ~7.25 MB kernel+rootfs */
+			};
+
+			partition@7c0000 {
+				label = "cfg";
+				reg = <0x007c0000 0x00030000>; /* 192 KB - config Tenda (CFM/CFG) */
+			};
+
+			/* GAP belum terverifikasi: 0x7f0000 - 0x800000 (64KB terakhir).
+			 * Cek dump full flash sebelum menganggap ini "unused". */
+		};
+	};
+};
+
+/*
+ * MAC address default dari printenv.txt / bdinfo.txt: 00:90:4c:88:88:88
+ * Ini kemungkinan besar MAC PLACEHOLDER pabrik (bukan unik per unit),
+ * karena polanya terlalu rapi (88:88:88). Jangan hardcode ke image OpenWrt;
+ * pastikan MAC asli tiap unit diambil dari partisi "factory" saat runtime.
+ */
