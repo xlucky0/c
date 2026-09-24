@@ -1,30 +1,30 @@
 /dts-v1/;
 
 /*
- * Board file custom, diturunkan dari sf19a28_fullmask_ac28s.dts (resmi
- * Siflower, repo 1806_SDK). Dipakai sebagai base karena flash size di
- * referensi itu total 8MB (0xa0000 + 0x760000 = 0x800000), sama dengan
- * flash fisik di device kalian.
+ * Board dts FINAL - dikonfirmasi langsung dari analisis byte-per-byte
+ * full_dump.bin (dump flash 8MB asli device). Diturunkan dari
+ * sf19a28_fullmask_ac28s.dts resmi Siflower untuk node-node SoC level
+ * (clock, pinctrl, gmac, wifi), tapi partition table SEPENUHNYA memakai
+ * hasil analisis nyata, bukan referensi stok.
  *
- * PERBEDAAN dari file stok Siflower: blok &spi2 di bawah TIDAK memakai
- * partition table bawaan ac28s. Sebagai gantinya dipakai offset yang
- * dikonfirmasi langsung dari device kalian:
- *   - firmware mulai di 0x80000  <- dari printenv.txt:
- *       bootcmd=sf probe 0 33000000;sf read 0x81000000 0x80000 0x300000;bootm
- *   - factory (ART/Wi-Fi cal) di 0x70000, ukuran 0x10000  <- dikonfirmasi
- *     dari "Data EEPROM - Wi-Fi Calibration.txt":
- *       sf read 0x81000000 0x70000 0x10000  -> isi kalibrasi radio terlihat
- *       di offset 0xb0-0xc0 dump (pola tanggal produksi & data non-0xFF)
- *
- * BELUM terverifikasi dari dump flash penuh (WAJIB dicek sebelum flashing
- * sungguhan - lihat PANDUAN_BUILD_OPENWRT_SFA28.md bagian 2):
- *   - Batas pasti spl-loader / u-boot / u-boot-env (di bawah pakai ukuran
- *     dari "Rangkuman Spesifikasi Perangkat" milik user: 32K/412K/4K -
- *     ini konsisten karena totalnya pas 0x70000, tapi belum dicocokkan
- *     byte-per-byte dengan dump asli)
- *   - Isi & format partisi cfm/cfg (khas Tenda, formatnya beda dari
- *     fixed-partitions biasa - kemungkinan perlu parser khusus)
- *   - 64KB terakhir (0x7f0000-0x800000) - tidak disebut di layout manapun
+ * BUKTI untuk tiap batas partisi (lihat PANDUAN_BUILD_OPENWRT_SFA28.md
+ * bagian "Bukti Analisis" untuk detail lengkap cara verifikasinya):
+ *   - spl-loader : magic "sa18" di offset 0x4, ukuran real (field header) 0x3ed0
+ *   - u-boot     : uImage header di 0x8014, name="U-Boot 2016.07-r#...",
+ *                  size=365154 byte -> data berakhir ~0x612b6, dibulatkan ke 0x60000
+ *   - u-boot-env : kosong/blank di 0x60000-0x70000 (65536 byte, PERSIS
+ *                  cocok dengan printenv.txt: "Environment size: 286/65532 bytes")
+ *   - factory    : data kalibrasi radio muncul mulai 0x70000 (konfirmasi lama),
+ *                  sisanya blank sampai 0x80000
+ *   - firmware   : kernel uImage header di 0x8015b (name="MIPS Tenda Linux-4.14.90",
+ *                  comp=LZMA, size=2037090), squashfs 4.0/XZ dimulai di 0x271a78
+ *                  (bytes_used=0x50b09c), total partisi genap 7MB sampai 0x780000
+ *   - oem-reserved: sisa flash 0x780000-0x800000 berisi campuran: blob config
+ *                  biner (kemungkinan "CFM/CFG" ala Tenda), NVRAM plaintext
+ *                  berisi default SSID "Tenda_VIP"/"Tenda_8F48E0" (~0x7e1000),
+ *                  dan satu blob kecil terenkripsi OpenSSL "Salted__" (~0x7f0fd9,
+ *                  fungsi belum diketahui - kemungkinan password admin default
+ *                  atau license key, JANGAN dihapus sebelum tahu fungsinya pasti)
  */
 
 #include "sf19a28_fullmask.dtsi"
@@ -34,8 +34,6 @@
 	#address-cells = <1>;
 	#size-cells = <1>;
 	compatible = "siflower,sf19a28-soc";
-	/* TODO: ganti model ini ke nama produk Tenda sebenarnya begitu
-	 * diketahui (mis. "tenda,ac28s-v1.0" atau apa pun nama resminya) */
 	model = "sf19a28-ac28s-custom";
 };
 
@@ -54,13 +52,11 @@
 	#address-cells = <1>;
 	#size-cells = <0>;
 
-	/* TODO: ganti compatible/node-name ini ke chip flash asli. Ringkasan
-	 * kalian menyebut W25Q64CV/S25FL064K (8MB / 64Mbit), BUKAN w25q128
-	 * seperti di dts stok ac28s - cek marking fisik chip di PCB untuk pastikan. */
-	w25q64@0 {
+	/* TODO: cocokkan dengan marking fisik chip di PCB kalian */
+	flash@0 {
 		compatible = "w25q64";
 		reg = <0>;
-		spi-max-frequency = <33000000>; /* dari "sf probe 0 33000000" */
+		spi-max-frequency = <33000000>;
 
 		bank-width = <2>;
 		device-width = <2>;
@@ -69,68 +65,48 @@
 
 		partition@0 {
 			label = "spl-loader";
-			reg = <0x0 0x8000>; /* 32K */
+			reg = <0x0 0x8000>; /* 32K, magic "sa18" @0x4, real size ~16KB */
 			read-only;
 		};
 
 		partition@8000 {
 			label = "u-boot";
-			reg = <0x8000 0x67000>; /* 412K */
+			reg = <0x8000 0x58000>; /* 352K, U-Boot 2016.07, uImage-wrapped */
+			read-only;
 		};
 
-		partition@6f000 {
+		partition@60000 {
 			label = "u-boot-env";
-			reg = <0x6f000 0x1000>; /* 4K */
+			reg = <0x60000 0x10000>; /* 64K - CONFIRMED cocok dgn printenv.txt */
 		};
 
 		factory: partition@70000 {
 			label = "factory";
-			reg = <0x70000 0x10000>; /* 64K - CONFIRMED dari dump Wi-Fi cal */
+			reg = <0x70000 0x10000>; /* 64K - kalibrasi radio, CONFIRMED */
 			read-only;
 		};
 
 		partition@80000 {
 			label = "firmware";
-			reg = <0x80000 0x740000>; /* CONFIRMED start dari bootcmd; ukuran = sisa flash s.d. sebelum cfm/cfg */
+			reg = <0x80000 0x700000>; /* 7MB genap - CONFIRMED: kernel+squashfs */
 		};
 
-		partition@7c0000 {
-			label = "cfm";
-			reg = <0x7c0000 0x30000>; /* 192K - config Tenda, belum diverifikasi */
+		partition@780000 {
+			label = "oem-reserved";
+			reg = <0x780000 0x80000>; /* 512K - config Tenda + blob terenkripsi, lihat catatan di atas */
 		};
-
-		/* 0x7f0000 - 0x800000 (64K terakhir): BELUM diketahui isinya,
-		 * jangan dipakai/ditimpa sebelum dump flash penuh dicek */
 	};
 };
 
-&uart0 {
-	status = "okay";
-};
-
-&pwm0 {
-	status = "okay";
-};
-
-&pwm1 {
-	status = "okay";
-};
-
-&timer0 {
-	status = "okay";
-};
-
-&usb_phy {
-	status = "okay";
-};
-
-&usb {
-	status = "okay";
-};
+&uart0 { status = "okay"; };
+&pwm0 { status = "okay"; };
+&pwm1 { status = "okay"; };
+&timer0 { status = "okay"; };
+&usb_phy { status = "okay"; };
+&usb { status = "okay"; };
 
 &wifi_rf {
 	status = "okay";
-	/* only support ext pa for 5G - dipertahankan dari referensi ac28s */
 	force_expa = <1>;
 	dual-antenna-calibrate = <1>;
 };
