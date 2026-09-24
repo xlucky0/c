@@ -1,0 +1,24 @@
+#!/bin/sh
+. /lib/functions/uci-defaults.sh
+. /lib/functions.sh
+
+board_config_update
+board=$(board_name)
+
+case "$board" in
+tenda,ac28s|sf,sfa28|sf,sf19a28*)
+	ucidef_set_interfaces_lan_wan "eth0.1" "eth0.2"
+	ucidef_add_switch "switch0" \
+		"1:lan:3" "2:lan:2" "3:lan:1" "4:wan" "6@eth0"
+
+	# Ekstraksi MAC fisik dari Factory partition /dev/mtd4
+	lan_mac=$(mtd_get_mac_binary factory 0x04)
+	[ -n "$lan_mac" ] && ucidef_set_interface_macaddr "lan" "$lan_mac"
+
+	wan_mac=$(mtd_get_mac_binary factory 0x28)
+	[ -n "$wan_mac" ] && ucidef_set_interface_macaddr "wan" "$wan_mac"
+	;;
+esac
+
+board_config_flush
+exit 0
