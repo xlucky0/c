@@ -1,139 +1,71 @@
 /dts-v1/;
-
-/*
- * Board dts FINAL - dikonfirmasi langsung dari analisis byte-per-byte
- * full_dump.bin (dump flash 8MB asli device). Diturunkan dari
- * sf19a28_fullmask_ac28s.dts resmi Siflower untuk node-node SoC level
- * (clock, pinctrl, gmac, wifi), tapi partition table SEPENUHNYA memakai
- * hasil analisis nyata, bukan referensi stok.
- *
- * BUKTI untuk tiap batas partisi (lihat PANDUAN_BUILD_OPENWRT_SFA28.md
- * bagian "Bukti Analisis" untuk detail lengkap cara verifikasinya):
- *   - spl-loader : magic "sa18" di offset 0x4, ukuran real (field header) 0x3ed0
- *   - u-boot     : uImage header di 0x8014, name="U-Boot 2016.07-r#...",
- *                  size=365154 byte -> data berakhir ~0x612b6, dibulatkan ke 0x60000
- *   - u-boot-env : kosong/blank di 0x60000-0x70000 (65536 byte, PERSIS
- *                  cocok dengan printenv.txt: "Environment size: 286/65532 bytes")
- *   - factory    : data kalibrasi radio muncul mulai 0x70000 (konfirmasi lama),
- *                  sisanya blank sampai 0x80000
- *   - firmware   : kernel uImage header di 0x8015b (name="MIPS Tenda Linux-4.14.90",
- *                  comp=LZMA, size=2037090), squashfs 4.0/XZ dimulai di 0x271a78
- *                  (bytes_used=0x50b09c), total partisi genap 7MB sampai 0x780000
- *   - oem-reserved: sisa flash 0x780000-0x800000 berisi campuran: blob config
- *                  biner (kemungkinan "CFM/CFG" ala Tenda), NVRAM plaintext
- *                  berisi default SSID "Tenda_VIP"/"Tenda_8F48E0" (~0x7e1000),
- *                  dan satu blob kecil terenkripsi OpenSSL "Salted__" (~0x7f0fd9,
- *                  fungsi belum diketahui - kemungkinan password admin default
- *                  atau license key, JANGAN dihapus sebelum tahu fungsinya pasti)
- */
-
 #include "sf19a28_fullmask.dtsi"
-#include "sf19a28-thermal_common.dtsi"
 
 / {
-	#address-cells = <1>;
-	#size-cells = <1>;
-	compatible = "siflower,sf19a28-soc";
-	model = "sf19a28-ac28s-custom";
+	model = "Tenda AC8v5 / AC28s 8MB Pure OpenWrt";
+	compatible = "tenda,ac28s", "sf,sfa28", "sf,sf19a28";
+
+	memory@0 {
+		device_type = "memory";
+		reg = <0x00000000 0x04000000>; /* 64 MB DDR2 */
+	};
+
+	chosen {
+		bootargs = "console=ttyS0,115200 rootfstype=squashfs,jffs2";
+	};
 };
 
-&gmac {
+&spi0 {
 	status = "okay";
-	delay = <0x40 0x20>;
-	esw-rst-gpio = <11>;
-};
-
-&spi2 {
-	status = "okay";
-	dmas = <&gdma 10
-	&gdma 11>;
-	dma-names = "tx", "rx";
-
-	#address-cells = <1>;
-	#size-cells = <0>;
-
-	/* TODO: cocokkan dengan marking fisik chip di PCB kalian */
 	flash@0 {
-		compatible = "w25q64";
+		compatible = "jedec,spi-nor";
 		reg = <0>;
 		spi-max-frequency = <33000000>;
 
-		bank-width = <2>;
-		device-width = <2>;
-		#address-cells = <1>;
-		#size-cells = <1>;
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
 
-		partition@0 {
-			label = "spl-loader";
-			reg = <0x0 0x8000>; /* 32K, magic "sa18" @0x4, real size ~16KB */
-			read-only;
-		};
+			/* 1. SPL Bootloader (sa18 magic) */
+			partition@0 {
+				label = "spl-loader";
+				reg = <0x00000000 0x00008000>;
+				read-only;
+			};
 
-		partition@8000 {
-			label = "u-boot";
-			reg = <0x8000 0x58000>; /* 352K, U-Boot 2016.07, uImage-wrapped */
-			read-only;
-		};
+			/* 2. U-Boot 2016.07 */
+			partition@8000 {
+				label = "u-boot";
+				reg = <0x00008000 0x00058000>;
+				read-only;
+			};
 
-		partition@60000 {
-			label = "u-boot-env";
-			reg = <0x60000 0x10000>; /* 64K - CONFIRMED cocok dgn printenv.txt */
-		};
+			/* 3. U-Boot Environment Variables */
+			partition@60000 {
+				label = "u-boot-env";
+				reg = <0x00060000 0x00010000>;
+			};
 
-		factory: partition@70000 {
-			label = "factory";
-			reg = <0x70000 0x10000>; /* 64K - kalibrasi radio, CONFIRMED */
-			read-only;
-		};
+			/* 4. Factory EEPROM (RF Caldata & Asli MAC) */
+			partition@70000 {
+				label = "factory";
+				reg = <0x00070000 0x00010000>;
+				read-only;
+			};
 
-		partition@80000 {
-			label = "firmware";
-			reg = <0x80000 0x700000>; /* 7MB genap - CONFIRMED: kernel+squashfs */
-		};
+			/* 5. Pure OpenWrt Firmware (Kernel + SquashFS RootFS) */
+			partition@80000 {
+				label = "firmware";
+				reg = <0x00080000 0x00700000>;
+			};
 
-		partition@780000 {
-			label = "oem-reserved";
-			reg = <0x780000 0x80000>; /* 512K - config Tenda + blob terenkripsi, lihat catatan di atas */
+			/* 6. OEM Reserved / CFM Config */
+			partition@780000 {
+				label = "oem-reserved";
+				reg = <0x00780000 0x00080000>;
+				read-only;
+			};
 		};
 	};
-};
-
-&uart0 { status = "okay"; };
-&pwm0 { status = "okay"; };
-&pwm1 { status = "okay"; };
-&timer0 { status = "okay"; };
-&usb_phy { status = "okay"; };
-&usb { status = "okay"; };
-
-&wifi_rf {
-	status = "okay";
-	force_expa = <1>;
-	dual-antenna-calibrate = <1>;
-};
-
-&gpio_keys {
-	status = "okay";
-	restart@27 {
-		label = "Key Restart";
-		linux,code = <0x198>;
-		gpios = <&gpio 27 0>;
-		poll-interval = <10>;
-		debounce-interval = <20>;
-	};
-};
-
-&wifi_lb {
-	status = "okay";
-	#address-cells = <1>;
-	#size-cells = <0>;
-	gpio-leds = <&gpio 12 0>;
-	smp-affinity = <2>;
-};
-
-&wifi_hb {
-	status = "okay";
-	#address-cells = <1>;
-	#size-cells = <0>;
-	gpio-leds = <&gpio 12 0>;
-	smp-affinity = <3>;
 };
