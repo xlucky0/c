@@ -1,0 +1,35 @@
+#!/bin/sh /etc/rc.common
+# /etc/init.d/factory-wifi
+# Service Pure OpenWrt untuk Siflower SF19A28 / SFA28
+# Mengambil 4 factory nodes dari /dev/mtd4 agar Wi-Fi memancarkan SSID & MAC asli router
+START=19
+
+read_factory_node() {
+	local offset=$1
+	local len=$2
+	dd if=/dev/mtd4 bs=1 skip=$offset count=$len 2>/dev/null
+}
+
+start() {
+	[ -c /dev/mtd4 ] || [ -b /dev/mtdblock4 ] || exit 0
+
+	# 1. LAN MAC (offset 0x04)
+	LAN_MAC=$(read_factory_node 4 6 | hexdump -v -e '1/1 "%02X:"' | sed 's/:$//')
+	# 2. WAN MAC (offset 0x28)
+	WAN_MAC=$(read_factory_node 40 6 | hexdump -v -e '1/1 "%02X:"' | sed 's/:$//')
+	# 3. Default SSID Suffix & Key PIN
+	MAC_TAIL=$(echo "$LAN_MAC" | awk -F: '{print $5$6}')
+	DEFAULT_SSID_2G="OpenWrt_${MAC_TAIL}_2.4G"
+	DEFAULT_SSID_5G="OpenWrt_${MAC_TAIL}_5G"
+	FACTORY_KEY=$(read_factory_node 64 8 | tr -d '\000' | tr -dc '[:alnum:]')
+
+	uci -q set wireless.default_radio0.ssid="${DEFAULT_SSID_2G}"
+	uci -q set wireless.default_radio1.ssid="${DEFAULT_SSID_5G}"
+	[ -n "$FACTORY_KEY" ] && {
+		uci -q set wireless.default_radio0.key="${FACTORY_KEY}"
+		uci -q set wireless.default_radio0.encryption="psk2"
+		uci -q set wireless.default_radio1.key="${FACTORY_KEY}"
+		uci -q set wireless.default_radio1.encryption="psk2"
+	}
+	uci commit wireless
+}
