@@ -1,0 +1,17 @@
+#!/bin/sh
+. /lib/functions/uci-defaults.sh
+
+board_config_update
+board=$(board_name)
+
+case "$board" in
+tenda,ac28s|sf,sfa28|sf,sf19a28*)
+	ucidef_set_led_netdev "wan" "WAN" "tenda:blue:wan" "eth0.2"
+	ucidef_set_led_wlan "wlan2g" "WLAN2G" "tenda:blue:wlan2g" "phy0-ap0"
+	ucidef_set_led_wlan "wlan5g" "WLAN5G" "tenda:blue:wlan5g" "phy1-ap0"
+	ucidef_set_led_default "sys" "SYS" "tenda:blue:sys" "1"
+	;;
+esac
+
+board_config_flush
+exit 0
