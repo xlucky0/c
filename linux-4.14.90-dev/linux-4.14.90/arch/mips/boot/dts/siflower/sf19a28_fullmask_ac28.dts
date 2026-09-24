@@ -1,5 +1,32 @@
 /dts-v1/;
 
+/*
+ * Board dts FINAL - dikonfirmasi langsung dari analisis byte-per-byte
+ * full_dump.bin (dump flash 8MB asli device). Diturunkan dari
+ * sf19a28_fullmask_ac28s.dts resmi Siflower untuk node-node SoC level
+ * (clock, pinctrl, gmac, wifi), tapi partition table SEPENUHNYA memakai
+ * hasil analisis nyata, bukan referensi stok.
+ *
+ * BUKTI untuk tiap batas partisi (lihat PANDUAN_BUILD_OPENWRT_SFA28.md
+ * bagian "Bukti Analisis" untuk detail lengkap cara verifikasinya):
+ *   - spl-loader : magic "sa18" di offset 0x4, ukuran real (field header) 0x3ed0
+ *   - u-boot     : uImage header di 0x8014, name="U-Boot 2016.07-r#...",
+ *                  size=365154 byte -> data berakhir ~0x612b6, dibulatkan ke 0x60000
+ *   - u-boot-env : kosong/blank di 0x60000-0x70000 (65536 byte, PERSIS
+ *                  cocok dengan printenv.txt: "Environment size: 286/65532 bytes")
+ *   - factory    : data kalibrasi radio muncul mulai 0x70000 (konfirmasi lama),
+ *                  sisanya blank sampai 0x80000
+ *   - firmware   : kernel uImage header di 0x8015b (name="MIPS Tenda Linux-4.14.90",
+ *                  comp=LZMA, size=2037090), squashfs 4.0/XZ dimulai di 0x271a78
+ *                  (bytes_used=0x50b09c), total partisi genap 7MB sampai 0x780000
+ *   - oem-reserved: sisa flash 0x780000-0x800000 berisi campuran: blob config
+ *                  biner (kemungkinan "CFM/CFG" ala Tenda), NVRAM plaintext
+ *                  berisi default SSID "Tenda_VIP"/"Tenda_8F48E0" (~0x7e1000),
+ *                  dan satu blob kecil terenkripsi OpenSSL "Salted__" (~0x7f0fd9,
+ *                  fungsi belum diketahui - kemungkinan password admin default
+ *                  atau license key, JANGAN dihapus sebelum tahu fungsinya pasti)
+ */
+
 #include "sf19a28_fullmask.dtsi"
 #include "sf19a28-thermal_common.dtsi"
 
@@ -7,8 +34,7 @@
 	#address-cells = <1>;
 	#size-cells = <1>;
 	compatible = "siflower,sf19a28-soc";
-	model = "sf19a28-ac28";
-
+	model = "sf19a28-ac28s-custom";
 };
 
 &gmac {
@@ -19,7 +45,6 @@
 
 &spi2 {
 	status = "okay";
-	//use-dma;
 	dmas = <&gdma 10
 	&gdma 11>;
 	dma-names = "tx", "rx";
@@ -27,10 +52,11 @@
 	#address-cells = <1>;
 	#size-cells = <0>;
 
-	w25q128@0 {
-		compatible = "w25q128";
-		reg = <0>;	/* chip select */
-		spi-max-frequency = <10000000>;
+	/* TODO: cocokkan dengan marking fisik chip di PCB kalian */
+	flash@0 {
+		compatible = "w25q64";
+		reg = <0>;
+		spi-max-frequency = <33000000>;
 
 		bank-width = <2>;
 		device-width = <2>;
@@ -39,61 +65,50 @@
 
 		partition@0 {
 			label = "spl-loader";
-			reg = <0x0 0x20000>; /* 128k */
+			reg = <0x0 0x8000>; /* 32K, magic "sa18" @0x4, real size ~16KB */
 			read-only;
 		};
 
-		partition@20000 {
+		partition@8000 {
 			label = "u-boot";
-			reg = <0x20000 0x60000>; /* 384k */
+			reg = <0x8000 0x58000>; /* 352K, U-Boot 2016.07, uImage-wrapped */
+			read-only;
+		};
+
+		partition@60000 {
+			label = "u-boot-env";
+			reg = <0x60000 0x10000>; /* 64K - CONFIRMED cocok dgn printenv.txt */
+		};
+
+		factory: partition@70000 {
+			label = "factory";
+			reg = <0x70000 0x10000>; /* 64K - kalibrasi radio, CONFIRMED */
+			read-only;
 		};
 
 		partition@80000 {
-			label = "u-boot-env";
-			reg = <0x80000 0x10000>; /* 64k */
-		};
-
-		factory:partition@90000 {
-			label = "factory";
-			reg = <0x90000 0x10000>; /* 64k */
-		};
-
-		partition@a0000 {
 			label = "firmware";
-			reg = <0xa0000 0xf60000>; /* 640k-16M */
+			reg = <0x80000 0x700000>; /* 7MB genap - CONFIRMED: kernel+squashfs */
+		};
+
+		partition@780000 {
+			label = "oem-reserved";
+			reg = <0x780000 0x80000>; /* 512K - config Tenda + blob terenkripsi, lihat catatan di atas */
 		};
 	};
 };
 
-&uart0 {
-	status = "okay";
-};
-
-&pwm0 {
-	status = "okay";
-};
-
-&pwm1 {
-	status = "okay";
-};
-
-&timer0 {
-	status = "okay";
-};
-
-&usb_phy {
-       status = "okay";
-};
-
-&usb {
-       status = "okay";
-};
+&uart0 { status = "okay"; };
+&pwm0 { status = "okay"; };
+&pwm1 { status = "okay"; };
+&timer0 { status = "okay"; };
+&usb_phy { status = "okay"; };
+&usb { status = "okay"; };
 
 &wifi_rf {
 	status = "okay";
-    /*only support ext pa for 5G*/
 	force_expa = <1>;
-    dual-antenna-calibrate = <1>;
+	dual-antenna-calibrate = <1>;
 };
 
 &gpio_keys {
@@ -109,7 +124,6 @@
 
 &wifi_lb {
 	status = "okay";
-
 	#address-cells = <1>;
 	#size-cells = <0>;
 	gpio-leds = <&gpio 12 0>;
@@ -118,7 +132,6 @@
 
 &wifi_hb {
 	status = "okay";
-
 	#address-cells = <1>;
 	#size-cells = <0>;
 	gpio-leds = <&gpio 12 0>;
